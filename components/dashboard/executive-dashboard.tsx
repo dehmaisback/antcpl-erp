@@ -5,38 +5,30 @@ import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
-  Banknote,
+  BellRing,
   Building2,
-  CalendarCheck,
+  CalendarClock,
   CheckCircle2,
+  ClipboardCheck,
   ClipboardList,
+  Eye,
   FileCheck2,
-  FileClock,
+  FileText,
+  Filter,
+  HardHat,
   Loader2,
+  MoreHorizontal,
+  Plus,
   ReceiptText,
-  Route,
+  Search,
   ShieldAlert,
-  TrendingUp,
+  SlidersHorizontal,
+  UploadCloud,
   UsersRound
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-import { PremiumCard, SectionHeader, StatPill } from "@/components/ui/premium";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { PremiumCard } from "@/components/ui/premium";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { StatusChip } from "@/components/ui/status-chip";
 import { cn, formatCurrency, formatDate, percentage } from "@/lib/format";
@@ -53,14 +45,31 @@ type DashboardState = {
   milestones: Record<string, unknown>[];
   authority: Record<string, unknown>[];
   documents: Record<string, unknown>[];
+  profiles: Record<string, unknown>[];
+};
+
+type SupervisionRow = {
+  id: string;
+  refNo: string;
+  project: string;
+  client: string;
+  consultant: string;
+  engineer: Record<string, unknown> | null;
+  progress: number;
+  lastVisit: string;
+  ncrOpen: number;
+  ncrClosed: number;
+  qualityLogs: number;
+  nextInspection: string;
+  status: string;
 };
 
 type ActivityItem = {
   title: string;
   meta: string;
   date: string;
-  tone: "blue" | "green" | "amber" | "rose" | "purple";
   icon: LucideIcon;
+  tone: keyof typeof toneMap;
 };
 
 const initialState: DashboardState = {
@@ -73,10 +82,12 @@ const initialState: DashboardState = {
   ncr: [],
   milestones: [],
   authority: [],
-  documents: []
+  documents: [],
+  profiles: []
 };
 
-const chartColors = ["#1267b8", "#31b980", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
+const pastel = ["#91c8ff", "#8ee5bc", "#f8c471", "#c7a6ff", "#f59aa9", "#9ca3af"];
+const qualityPalette = ["#dbeafe", "#dcfce7", "#fef3c7", "#f3e8ff", "#ffe4e6", "#e0f2fe"];
 
 export function ExecutiveDashboard() {
   const supabase = getSupabaseClient();
@@ -93,7 +104,7 @@ export function ExecutiveDashboard() {
     setLoading(true);
     setError(null);
 
-    const [projects, tasks, invoices, quotations, attendance, siteVisits, ncr, milestones, authority, documents] = await Promise.all([
+    const [projects, tasks, invoices, quotations, attendance, siteVisits, ncr, milestones, authority, documents, profiles] = await Promise.all([
       supabase.from("projects").select("*").order("created_at", { ascending: false }),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
       supabase.from("invoices").select("*").order("created_at", { ascending: false }),
@@ -103,10 +114,11 @@ export function ExecutiveDashboard() {
       supabase.from("ncr_logs").select("*").order("created_at", { ascending: false }),
       supabase.from("payment_milestones").select("*").order("due_date", { ascending: true }),
       supabase.from("authority_submissions").select("*").order("created_at", { ascending: false }),
-      supabase.from("documents").select("*").order("created_at", { ascending: false }).limit(20)
+      supabase.from("documents").select("*").order("created_at", { ascending: false }).limit(40),
+      supabase.from("profiles").select("id, full_name, role, designation, department").order("full_name")
     ]);
 
-    const firstError = [projects, tasks, invoices, quotations, attendance, siteVisits, ncr, milestones, authority, documents].find((result) => result.error)?.error;
+    const firstError = [projects, tasks, invoices, quotations, attendance, siteVisits, ncr, milestones, authority, documents, profiles].find((result) => result.error)?.error;
     if (firstError) setError(firstError.message);
 
     setData({
@@ -119,7 +131,8 @@ export function ExecutiveDashboard() {
       ncr: ncr.data ?? [],
       milestones: milestones.data ?? [],
       authority: authority.data ?? [],
-      documents: documents.data ?? []
+      documents: documents.data ?? [],
+      profiles: profiles.data ?? []
     });
     setLoading(false);
   }, [supabase]);
@@ -128,376 +141,486 @@ export function ExecutiveDashboard() {
     load();
   }, [load]);
 
+  const profileMap = useMemo(() => new Map(data.profiles.map((profile) => [String(profile.id), profile])), [data.profiles]);
+  const rows = useMemo(() => buildSupervisionRows(data, profileMap), [data, profileMap]);
+
   const metrics = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const weekAhead = new Date(Date.now() + 7 * 86400000);
-    const activeProjects = data.projects.filter((project) => ["Active", "Delayed"].includes(String(project.status))).length;
-    const overdueTasks = data.tasks.filter((task) => task.due_date && new Date(String(task.due_date)) < new Date() && task.status !== "Completed").length;
-    const invoicesRaised = data.invoices.reduce((sum, invoice) => sum + Number(invoice.total_amount ?? 0), 0);
-    const paymentsReceived = data.invoices.reduce((sum, invoice) => sum + Number(invoice.payment_received ?? 0), 0);
-    const staffPresent = data.attendance.filter((item) => item.date === today && ["Present", "Late", "Half Day"].includes(String(item.status))).length;
-    const siteVisitsWeek = data.siteVisits.filter((visit) => {
-      if (!visit.visit_date) return false;
-      const date = new Date(String(visit.visit_date));
-      return date >= new Date(Date.now() - 86400000) && date <= weekAhead;
-    }).length;
-    const pendingQuotations = data.quotations.filter((quote) => ["Sent", "Follow-Up", "LPO Pending"].includes(String(quote.status))).length;
-    const ncrOpen = data.ncr.filter((item) => item.status !== "Closed").length;
-
+    const totalSites = data.projects.length;
+    const totalProgress = rows.reduce((sum, row) => sum + row.progress, 0);
+    const ncrRaised = data.ncr.length;
+    const ncrClosed = data.ncr.filter((item) => item.status === "Closed").length;
+    const openNcr = ncrRaised - ncrClosed;
+    const qualityLogs = data.documents.filter((item) => ["Site Report", "Authority Submission", "BOQ", "Tender", "Contract"].includes(String(item.document_type))).length + data.siteVisits.length;
+    const pendingInvoices = data.invoices.filter((invoice) => ["Draft", "Issued", "Overdue"].includes(String(invoice.status))).length;
+    const outstandingPayments = data.invoices.reduce((sum, invoice) => sum + Number(invoice.balance ?? 0), 0);
     return {
-      activeProjects,
-      totalTasks: data.tasks.length,
-      pendingTasks: data.tasks.filter((task) => ["Pending", "Not Started", "Review"].includes(String(task.status))).length,
-      overdueTasks,
-      invoicesRaised,
-      paymentsReceived,
-      pendingQuotations,
-      staffPresent,
-      siteVisitsWeek,
-      ncrOpen,
-      collectionRate: percentage(paymentsReceived, invoicesRaised)
+      totalSites,
+      progress: percentage(totalProgress, Math.max(rows.length * 100, 1)),
+      ncrRaised,
+      ncrClosed,
+      openNcr,
+      qualityLogs,
+      pendingInvoices,
+      outstandingPayments
     };
-  }, [data]);
+  }, [data, rows]);
 
-  const projectProgress = useMemo(
-    () =>
-      data.projects.slice(0, 6).map((project) => ({
-        name: String(project.project_name ?? "Project"),
-        progress: Number(project.overall_progress ?? 0),
-        budget: Number(project.budget ?? 0),
-        authority: String(project.authority ?? "Authority"),
-        status: String(project.status ?? "Active")
-      })),
-    [data.projects]
+  const ncrChart = useMemo(
+    () => [
+      { name: "Closed", value: metrics.ncrClosed },
+      { name: "Open", value: metrics.openNcr || 1 }
+    ],
+    [metrics.ncrClosed, metrics.openNcr]
   );
 
-  const taskStatus = useMemo(() => withFallback(groupByStatus(data.tasks, "status"), "No tasks"), [data.tasks]);
-  const authorityStatus = useMemo(() => withFallback(groupByStatus(data.authority, "status"), "No submissions"), [data.authority]);
-  const attendanceTrend = useMemo(() => groupByStatus(data.attendance, "date").slice(0, 8).reverse(), [data.attendance]);
-  const invoiceCollection = useMemo(
-    () =>
-      data.invoices.slice(0, 8).map((invoice) => ({
-        name: String(invoice.invoice_no ?? "Invoice"),
-        raised: Number(invoice.total_amount ?? 0),
-        received: Number(invoice.payment_received ?? 0)
-      })),
-    [data.invoices]
+  const qualityChart = useMemo(
+    () => [
+      { name: "Inspection", value: data.siteVisits.length || 1 },
+      { name: "Material", value: data.documents.filter((item) => String(item.document_type).includes("BOQ")).length || 1 },
+      { name: "Authority", value: data.authority.length || 1 }
+    ],
+    [data.authority.length, data.documents, data.siteVisits.length]
   );
-  const budgetData = useMemo(
-    () =>
-      data.projects.slice(0, 5).map((project) => ({
-        name: String(project.project_name ?? "Project"),
-        budget: Number(project.budget ?? 0),
-        spent: Number(project.budget ?? 0) * (Number(project.overall_progress ?? 0) / 100) * 0.72
-      })),
-    [data.projects]
-  );
+
   const activityFeed = useMemo(() => buildActivityFeed(data), [data]);
+  const recentNcr = data.ncr.slice(0, 4);
+  const recentQuality = data.documents.slice(0, 4);
+  const upcomingInspections = rows.filter((row) => row.nextInspection !== "-").slice(0, 4);
 
   if (loading) {
     return (
       <div className="flex min-h-96 items-center justify-center rounded-[1.75rem] border border-blue-100 bg-white text-sm font-bold text-slate-500 shadow-card">
         <Loader2 className="mr-2 h-5 w-5 animate-spin text-brand-600" />
-        Loading executive dashboard
+        Loading ANTCPL supervision ERP
       </div>
     );
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-5">
       {error ? <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</div> : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_24rem]">
-        <PremiumCard className="overflow-hidden p-0">
-          <div className="relative p-6 sm:p-7">
-            <div className="absolute right-0 top-0 h-36 w-72 rounded-bl-[4rem] bg-gradient-to-br from-blue-50 to-transparent" />
-            <SectionHeader
-              eyebrow="A N T Engineering Consultants"
-              title="Executive Dashboard"
-              description="Live operating view for Dubai consultancy projects, authority approvals, AOR coordination, finance, staff attendance, site supervision, and NCR closeout."
-              action={<span className="rounded-2xl bg-navy-50 px-4 py-3 text-sm font-black text-navy-800">Today: {formatDate(new Date().toISOString())}</span>}
-            />
-            <div className="mt-6 grid gap-3 md:grid-cols-4">
-              <StatPill label="Active projects" value={metrics.activeProjects} icon={Building2} />
-              <StatPill label="Collection" value={`${metrics.collectionRate}%`} icon={Banknote} tone="green" />
-              <StatPill label="Overdue tasks" value={metrics.overdueTasks} icon={AlertTriangle} tone={metrics.overdueTasks ? "rose" : "green"} />
-              <StatPill label="Open NCR" value={metrics.ncrOpen} icon={ShieldAlert} tone={metrics.ncrOpen ? "rose" : "green"} />
-            </div>
-          </div>
-        </PremiumCard>
-
-        <PremiumCard className="p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Needs Action</p>
-              <h3 className="mt-1 text-xl font-black text-navy-900">Priority queue</h3>
-            </div>
-            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-50 text-amber-700">
-              <FileClock className="h-5 w-5" />
-            </span>
-          </div>
-          <div className="mt-4 space-y-3">
-            <PriorityItem label="Authority submissions pending" value={data.authority.filter((item) => item.status !== "Approved").length} tone="amber" />
-            <PriorityItem label="Sales quotations to follow up" value={metrics.pendingQuotations} tone="blue" />
-            <PriorityItem label="Site visits this week" value={metrics.siteVisitsWeek} tone="green" />
-          </div>
-        </PremiumCard>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-8">
+        <KpiCard title="Total Sites" value={metrics.totalSites} subtitle="Active consultancy sites" icon={Building2} tone="blue" variant="compact" />
+        <KpiCard title="Supervision Progress" value={`${metrics.progress}%`} subtitle="Average site progress" icon={HardHat} tone="green" variant="progress" progress={metrics.progress} />
+        <KpiCard title="NCR Raised" value={metrics.ncrRaised} subtitle="Total non-conformances" icon={ShieldAlert} tone="rose" variant="icon" />
+        <KpiCard title="NCR Closed" value={metrics.ncrClosed} subtitle="Corrective actions closed" icon={CheckCircle2} tone="green" variant="trend" trend="+12%" />
+        <KpiCard title="Open NCR" value={metrics.openNcr} subtitle="Needs closeout" icon={AlertTriangle} tone="amber" variant="compact" />
+        <KpiCard title="Quality Logs" value={metrics.qualityLogs} subtitle="Reports and inspections" icon={ClipboardCheck} tone="purple" variant="progress" progress={Math.min(metrics.qualityLogs * 8, 100)} />
+        <KpiCard title="Pending Invoices" value={metrics.pendingInvoices} subtitle="Finance follow-up" icon={ReceiptText} tone="blue" variant="icon" />
+        <KpiCard title="Outstanding" value={formatCurrency(metrics.outstandingPayments)} subtitle="Payments balance" icon={FileCheck2} tone="amber" variant="trend" trend="-4%" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Total Tasks" value={metrics.totalTasks} helper={`${metrics.pendingTasks} pending or review`} icon={ClipboardList} tone="purple" variant="compact" />
-        <MetricCard label="Invoices Raised" value={formatCurrency(metrics.invoicesRaised)} helper={`${data.invoices.length} invoices`} icon={ReceiptText} tone="blue" variant="wide" />
-        <MetricCard label="Payments Received" value={formatCurrency(metrics.paymentsReceived)} helper={`${metrics.collectionRate}% collected`} icon={Banknote} tone="green" variant="wide" />
-        <MetricCard label="Staff Present Today" value={metrics.staffPresent} helper="Office, site, WFH" icon={UsersRound} tone="green" variant="compact" />
-        <MetricCard label="Site Visits" value={metrics.siteVisitsWeek} helper="This week" icon={CalendarCheck} tone="amber" variant="compact" />
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[0.92fr_1.08fr]">
-        <ProjectProgressBoard projects={projectProgress} />
-        <div className="grid gap-5 md:grid-cols-2">
-          <ChartCard title="Task status" subtitle="Workload by delivery status">
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie data={taskStatus} dataKey="value" nameKey="name" innerRadius={64} outerRadius={96} paddingAngle={4}>
-                  {taskStatus.map((_entry, index) => (
-                    <Cell key={index} fill={chartColors[index % chartColors.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <AuthorityCard data={authorityStatus} total={data.authority.length} />
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.75fr_0.75fr]">
+        <SiteProgressCard rows={rows} />
+        <DonutCard title="NCR Status" subtitle="Raised vs closed" center={`${metrics.openNcr}`} centerLabel="open" data={ncrChart} colors={["#7dd3a8", "#f6a6b2"]} />
+        <div className="grid gap-5">
+          <DonutCard title="Quality Logs" subtitle="Inspection categories" center={`${metrics.qualityLogs}`} centerLabel="logs" data={qualityChart} colors={["#91c8ff", "#8ee5bc", "#c7a6ff"]} compact />
+          <TodaySummary rows={rows} visits={data.siteVisits} />
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-3">
-        <ChartCard title="Budget vs spent" subtitle="Estimated utilization by project">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={budgetData}>
-              <CartesianGrid vertical={false} stroke="#e8f0fb" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-              <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${Number(value) / 1000}k`} />
-              <Tooltip formatter={(value) => formatCurrency(value)} />
-              <Bar dataKey="budget" fill="#dbeafe" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="spent" fill="#1267b8" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      <FilterToolbar />
 
-        <ChartCard title="Invoice collection" subtitle="Raised vs received">
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={invoiceCollection}>
-              <CartesianGrid vertical={false} stroke="#e8f0fb" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-              <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `${Number(value) / 1000}k`} />
-              <Tooltip formatter={(value) => formatCurrency(value)} />
-              <Area dataKey="raised" fill="#dbeafe" stroke="#1267b8" strokeWidth={2} />
-              <Area dataKey="received" fill="#dcfce7" stroke="#31b980" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      <SupervisionTable rows={rows} />
 
-        <ChartCard title="Attendance trend" subtitle="Daily attendance records">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={attendanceTrend}>
-              <CartesianGrid vertical={false} stroke="#e8f0fb" />
-              <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-              <YAxis tickLine={false} axisLine={false} />
-              <Tooltip />
-              <Line type="monotone" dataKey="value" stroke="#1267b8" strokeWidth={3} dot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1fr_25rem]">
-        <PremiumCard className="p-5">
-          <SectionHeader
-            eyebrow="Consultancy lifecycle"
-            title="Current project pulse"
-            description="Progress, authority exposure, budgets, and delivery status across active ANTCPL work."
-          />
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {projectProgress.map((project) => (
-              <div key={project.name} className="rounded-[1.35rem] border border-blue-100 bg-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:bg-white hover:shadow-card">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-black text-navy-900">{project.name}</p>
-                    <p className="mt-1 truncate text-xs font-semibold text-slate-500">{project.authority} authority workflow</p>
-                  </div>
-                  <StatusChip value={project.status} />
-                </div>
-                <div className="mt-5">
-                  <ProgressBar value={project.progress} />
-                  <div className="mt-2 flex justify-between text-xs font-bold text-slate-500">
-                    <span>{project.progress}% complete</span>
-                    <span>{formatCurrency(project.budget)}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </PremiumCard>
-
-        <ActivityFeed items={activityFeed} />
+      <div className="grid gap-5 xl:grid-cols-[1fr_1fr_1fr_22rem]">
+        <RecentNcrCard rows={recentNcr} profileMap={profileMap} />
+        <QualityLogCard rows={recentQuality} />
+        <UpcomingInspectionCard rows={upcomingInspections} />
+        <ActivityAndActions items={activityFeed} />
       </div>
     </section>
   );
 }
 
-function MetricCard({
-  label,
+function KpiCard({
+  title,
   value,
+  subtitle,
   icon: Icon,
   tone,
-  helper,
-  variant
+  variant,
+  progress,
+  trend
 }: {
-  label: string;
-  value: string | number;
+  title: string;
+  value: ReactNode;
+  subtitle: string;
   icon: LucideIcon;
-  tone: "blue" | "green" | "amber" | "rose" | "purple";
-  helper: string;
-  variant: "compact" | "wide";
+  tone: keyof typeof toneMap;
+  variant: "compact" | "progress" | "icon" | "trend";
+  progress?: number;
+  trend?: string;
 }) {
-  const toneClass = toneMap[tone];
-
   return (
-    <PremiumCard className={cn("p-4", variant === "wide" && "md:col-span-2 xl:col-span-1")} hover>
+    <PremiumCard className={cn("animate-rise-in p-4", variant === "progress" && "bg-gradient-to-br from-white to-blue-50/60")} hover>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-bold text-slate-500">{label}</p>
+          <p className="truncate text-xs font-black uppercase tracking-wide text-slate-400">{title}</p>
           <p className="mt-2 truncate text-2xl font-black text-navy-900">{value}</p>
         </div>
-        <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-2xl", toneClass)}>
+        <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-2xl", toneMap[tone])}>
           <Icon className="h-5 w-5" />
         </span>
       </div>
-      <p className="mt-3 text-xs font-bold text-slate-400">{helper}</p>
+      {variant === "progress" ? (
+        <div className="mt-4">
+          <ProgressBar value={progress ?? 0} />
+        </div>
+      ) : null}
+      {variant === "trend" ? <p className="mt-3 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">{trend} this month</p> : null}
+      <p className="mt-3 text-xs font-bold text-slate-500">{subtitle}</p>
     </PremiumCard>
   );
 }
 
-function PriorityItem({ label, value, tone }: { label: string; value: number; tone: "blue" | "green" | "amber" }) {
-  const color = tone === "green" ? "bg-emerald-50 text-emerald-700" : tone === "amber" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-brand-700";
-
+function SiteProgressCard({ rows }: { rows: SupervisionRow[] }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-white px-4 py-3 shadow-sm">
-      <span className="text-sm font-bold text-navy-800">{label}</span>
-      <span className={cn("rounded-full px-2.5 py-1 text-xs font-black", color)}>{value}</span>
-    </div>
-  );
-}
-
-function ProjectProgressBoard({ projects }: { projects: Array<{ name: string; progress: number; budget: number; authority: string; status: string }> }) {
-  const leader = projects[0];
-
-  return (
-    <PremiumCard className="overflow-hidden p-0">
-      <div className="grid min-h-full md:grid-cols-[0.85fr_1.15fr]">
-        <div className="bg-gradient-to-br from-navy-900 via-navy-700 to-brand-700 p-5 text-white">
-          <div className="flex items-center gap-2 text-sm font-bold text-blue-100">
-            <TrendingUp className="h-4 w-4" />
-            Project progress overview
-          </div>
-          <p className="mt-5 text-4xl font-black">{leader?.progress ?? 0}%</p>
-          <p className="mt-2 text-sm font-semibold text-blue-100">{leader?.name ?? "No active project"} leading current delivery</p>
-          <div className="mt-6 rounded-2xl bg-white/12 p-4 backdrop-blur">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-100">Executive signal</p>
-            <p className="mt-2 text-sm leading-6 text-white/90">Design stage, authority approvals, site supervision, invoices, and NCR actions are visible in one operating view.</p>
-          </div>
-        </div>
-        <div className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-black text-navy-900">Active projects</h3>
-              <p className="text-sm font-medium text-slate-500">Overall completion by project</p>
-            </div>
-            <ArrowUpRight className="h-5 w-5 text-brand-600" />
-          </div>
-          <div className="space-y-4">
-            {projects.map((project) => (
-              <div key={project.name}>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-black text-navy-900">{project.name}</p>
-                    <p className="truncate text-xs font-semibold text-slate-400">{project.authority}</p>
-                  </div>
-                  <span className="text-sm font-black text-navy-900">{project.progress}%</span>
+    <PremiumCard className="p-5">
+      <CardHeader title="Site Progress" subtitle="Supervision completion by live site" icon={HardHat} />
+      <div className="mt-5 space-y-4">
+        {rows.slice(0, 6).map((row) => (
+          <div key={row.id} className="grid gap-3 rounded-2xl border border-blue-50 bg-slate-50/70 p-3 sm:grid-cols-[1fr_6rem] sm:items-center">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-navy-900">{row.project}</p>
+                  <p className="truncate text-xs font-semibold text-slate-500">{row.client}</p>
                 </div>
-                <ProgressBar value={project.progress} />
+                <StatusChip value={row.status} />
               </div>
-            ))}
-            {projects.length === 0 ? <p className="rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">No active projects yet.</p> : null}
-          </div>
-        </div>
-      </div>
-    </PremiumCard>
-  );
-}
-
-function AuthorityCard({ data, total }: { data: Array<{ name: string; value: number }>; total: number }) {
-  return (
-    <ChartCard title="Authority status" subtitle="DCD, Nakheel, Trakhees, DM, DDA">
-      <div className="space-y-3">
-        {data.map((status, index) => (
-          <div key={status.name} className="rounded-2xl border border-blue-100 bg-slate-50/70 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <StatusChip value={status.name} />
-              <span className="text-sm font-black text-navy-900">{status.value}</span>
+              <ProgressBar value={row.progress} />
             </div>
-            <ProgressBar value={percentage(status.value, total || status.value)} />
+            <p className="text-right text-xl font-black text-navy-900">{row.progress}%</p>
           </div>
         ))}
       </div>
-    </ChartCard>
+    </PremiumCard>
   );
 }
 
-function ActivityFeed({ items }: { items: ActivityItem[] }) {
+function DonutCard({
+  title,
+  subtitle,
+  center,
+  centerLabel,
+  data,
+  colors,
+  compact = false
+}: {
+  title: string;
+  subtitle: string;
+  center: string;
+  centerLabel: string;
+  data: Array<{ name: string; value: number }>;
+  colors: string[];
+  compact?: boolean;
+}) {
   return (
     <PremiumCard className="p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Recent Activity</p>
-          <h3 className="mt-1 text-xl font-black text-navy-900">Updates feed</h3>
+      <CardHeader title={title} subtitle={subtitle} icon={ClipboardList} />
+      <div className={cn("relative", compact ? "h-48" : "h-72")}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={data} dataKey="value" nameKey="name" innerRadius={compact ? 52 : 76} outerRadius={compact ? 76 : 108} paddingAngle={4}>
+              {data.map((_entry, index) => (
+                <Cell key={index} fill={colors[index % colors.length]} />
+              ))}
+            </Pie>
+            <Tooltip />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <div className="text-center">
+            <p className="text-3xl font-black text-navy-900">{center}</p>
+            <p className="text-xs font-black uppercase tracking-wide text-slate-400">{centerLabel}</p>
+          </div>
         </div>
-        <Route className="h-5 w-5 text-brand-600" />
       </div>
-      <div className="mt-5 space-y-4">
-        {items.slice(0, 7).map((item, index) => {
+      <div className="grid grid-cols-2 gap-2">
+        {data.map((item, index) => (
+          <div key={item.name} className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
+            <span className="truncate">{item.name}</span>
+          </div>
+        ))}
+      </div>
+    </PremiumCard>
+  );
+}
+
+function TodaySummary({ rows, visits }: { rows: SupervisionRow[]; visits: Record<string, unknown>[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayVisits = visits.filter((visit) => String(visit.visit_date ?? "").startsWith(today)).length;
+  const nextRow = rows.find((row) => row.nextInspection !== "-");
+
+  return (
+    <PremiumCard className="p-5">
+      <CardHeader title="Today's Site Summary" subtitle="Inspection and supervision signal" icon={CalendarClock} />
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <SummaryTile label="Visits" value={todayVisits} />
+        <SummaryTile label="Open NCR" value={rows.reduce((sum, row) => sum + row.ncrOpen, 0)} />
+        <SummaryTile label="Sites" value={rows.length} />
+      </div>
+      <div className="mt-4 rounded-2xl bg-blue-50 p-3">
+        <p className="text-xs font-black uppercase tracking-wide text-brand-700">Next inspection</p>
+        <p className="mt-1 text-sm font-black text-navy-900">{nextRow?.project ?? "No inspection scheduled"}</p>
+        <p className="text-xs font-bold text-slate-500">{nextRow?.nextInspection ?? "-"}</p>
+      </div>
+    </PremiumCard>
+  );
+}
+
+function FilterToolbar() {
+  return (
+    <PremiumCard className="p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <label className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl border border-blue-100 bg-slate-50/80 px-4 py-3 text-sm text-slate-500">
+          <Search className="h-4 w-4 shrink-0" />
+          <input className="min-w-0 flex-1 bg-transparent font-medium text-navy-900 outline-none placeholder:text-slate-400" placeholder="Search ref no, project, client, consultant, site engineer" />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {["All Sites", "Open NCR", "This Week", "Authority", "Delayed"].map((item, index) => (
+            <button key={item} className={cn("inline-flex items-center gap-2 rounded-2xl border px-3.5 py-2.5 text-xs font-black shadow-sm transition hover:-translate-y-0.5", index === 0 ? "border-brand-100 bg-blue-50 text-brand-700" : "border-blue-100 bg-white text-navy-700 hover:bg-blue-50")}>
+              {index === 0 ? <Filter className="h-4 w-4" /> : null}
+              {item}
+            </button>
+          ))}
+          <button className="inline-flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-3.5 py-2.5 text-xs font-black text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50">
+            <SlidersHorizontal className="h-4 w-4 text-brand-600" />
+            Advanced
+          </button>
+        </div>
+      </div>
+    </PremiumCard>
+  );
+}
+
+function SupervisionTable({ rows }: { rows: SupervisionRow[] }) {
+  return (
+    <PremiumCard className="overflow-hidden p-0">
+      <div className="border-b border-blue-50 px-5 py-4">
+        <CardHeader title="Main Supervision Register" subtitle="Site progress, NCR, quality logs, inspections, and assigned engineer ownership" icon={Building2} />
+      </div>
+      <div className="premium-scroll overflow-x-auto">
+        <table className="w-full min-w-[1380px] border-separate border-spacing-0">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-slate-50/95">
+              {["Ref No", "Project/Site", "Client", "Consultant", "Assigned Site Engineer", "Progress %", "Last Site Visit", "NCR Open", "NCR Closed", "Quality Logs", "Next Inspection", "Status", "Actions"].map((column) => (
+                <th key={column} className="border-b border-blue-50 px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-slate-500 first:pl-5">
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="transition hover:bg-blue-50/45">
+                <td className="border-b border-blue-50 px-4 py-3 pl-5 text-xs font-black text-brand-700">{row.refNo}</td>
+                <td className="border-b border-blue-50 px-4 py-3">
+                  <p className="text-sm font-black text-navy-900">{row.project}</p>
+                  <p className="text-xs font-semibold text-slate-500">Dubai supervision site</p>
+                </td>
+                <td className="border-b border-blue-50 px-4 py-3 text-sm font-semibold text-slate-700">{row.client}</td>
+                <td className="border-b border-blue-50 px-4 py-3 text-sm font-semibold text-slate-700">{row.consultant}</td>
+                <td className="border-b border-blue-50 px-4 py-3">
+                  <EngineerCell profile={row.engineer} />
+                </td>
+                <td className="border-b border-blue-50 px-4 py-3">
+                  <div className="min-w-36">
+                    <ProgressBar value={row.progress} />
+                    <span className="mt-1 block text-xs font-black text-slate-500">{row.progress}%</span>
+                  </div>
+                </td>
+                <td className="border-b border-blue-50 px-4 py-3 text-sm font-semibold text-slate-700">{row.lastVisit}</td>
+                <td className="border-b border-blue-50 px-4 py-3"><CountBadge value={row.ncrOpen} tone="rose" /></td>
+                <td className="border-b border-blue-50 px-4 py-3"><CountBadge value={row.ncrClosed} tone="green" /></td>
+                <td className="border-b border-blue-50 px-4 py-3"><CountBadge value={row.qualityLogs} tone="blue" /></td>
+                <td className="border-b border-blue-50 px-4 py-3 text-sm font-semibold text-slate-700">{row.nextInspection}</td>
+                <td className="border-b border-blue-50 px-4 py-3"><StatusChip value={row.status} /></td>
+                <td className="border-b border-blue-50 px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    <button className="rounded-xl p-2 text-slate-500 transition hover:bg-blue-50 hover:text-brand-700" title="View"><Eye className="h-4 w-4" /></button>
+                    <button className="rounded-xl p-2 text-slate-500 transition hover:bg-blue-50 hover:text-brand-700" title="More"><MoreHorizontal className="h-4 w-4" /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PremiumCard>
+  );
+}
+
+function RecentNcrCard({ rows, profileMap }: { rows: Record<string, unknown>[]; profileMap: Map<string, Record<string, unknown>> }) {
+  return (
+    <WidgetCard title="Recent NCR" subtitle="Severity, root cause, due date, closeout progress" icon={ShieldAlert}>
+      {rows.map((row) => (
+        <div key={String(row.id)} className="rounded-2xl border border-blue-50 bg-slate-50/70 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black text-navy-900">{String(row.title ?? "NCR")}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Root cause: {String(row.corrective_action ?? "Under review").slice(0, 42)}</p>
+            </div>
+            <StatusChip value={row.severity} />
+          </div>
+          <div className="mt-3 flex items-center justify-between text-xs font-bold text-slate-500">
+            <span>{String(profileMap.get(String(row.assigned_to))?.full_name ?? "Assigned engineer")}</span>
+            <span>{formatDate(row.due_date)}</span>
+          </div>
+          <div className="mt-3"><ProgressBar value={String(row.status) === "Closed" ? 100 : 45} /></div>
+        </div>
+      ))}
+      {rows.length === 0 ? <EmptyWidget label="No NCR raised." /> : null}
+    </WidgetCard>
+  );
+}
+
+function QualityLogCard({ rows }: { rows: Record<string, unknown>[] }) {
+  const categories = ["Inspection", "Material", "Workmanship", "Testing", "Safety", "Authority"];
+  return (
+    <WidgetCard title="Recent Quality Logs" subtitle="Inspection, material, testing, safety, authority" icon={ClipboardCheck}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {categories.map((item, index) => (
+          <span key={item} className="rounded-full px-2.5 py-1 text-[11px] font-black text-navy-700" style={{ background: qualityPalette[index] }}>
+            {item}
+          </span>
+        ))}
+      </div>
+      {rows.map((row) => (
+        <div key={String(row.id)} className="flex items-center justify-between gap-3 rounded-2xl border border-blue-50 bg-slate-50/70 p-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black text-navy-900">{String(row.title ?? "Quality log")}</p>
+            <p className="truncate text-xs font-semibold text-slate-500">{String(row.document_type ?? "Inspection")} / {String(row.revision_no ?? "R0")}</p>
+          </div>
+          <StatusChip value={row.status ?? "Submitted"} />
+        </div>
+      ))}
+      {rows.length === 0 ? <EmptyWidget label="No quality logs yet." /> : null}
+    </WidgetCard>
+  );
+}
+
+function UpcomingInspectionCard({ rows }: { rows: SupervisionRow[] }) {
+  return (
+    <WidgetCard title="Upcoming Inspections" subtitle="Next planned site visits and authority checks" icon={CalendarClock}>
+      {rows.map((row) => (
+        <div key={row.id} className="flex items-center justify-between gap-3 rounded-2xl border border-blue-50 bg-slate-50/70 p-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black text-navy-900">{row.project}</p>
+            <p className="truncate text-xs font-semibold text-slate-500">{row.engineer?.full_name ? String(row.engineer.full_name) : "Site engineer"}</p>
+          </div>
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-black text-brand-700">{row.nextInspection}</span>
+        </div>
+      ))}
+      {rows.length === 0 ? <EmptyWidget label="No upcoming inspections." /> : null}
+    </WidgetCard>
+  );
+}
+
+function ActivityAndActions({ items }: { items: ActivityItem[] }) {
+  const actions = [
+    { label: "Add Site Visit", icon: CalendarClock, tone: "blue" },
+    { label: "Raise NCR", icon: ShieldAlert, tone: "rose" },
+    { label: "Upload Document", icon: UploadCloud, tone: "green" },
+    { label: "Create Inspection", icon: ClipboardCheck, tone: "purple" },
+    { label: "Create Invoice", icon: ReceiptText, tone: "amber" },
+    { label: "Add Task", icon: Plus, tone: "blue" }
+  ] as const;
+
+  return (
+    <div className="space-y-5">
+      <WidgetCard title="Quick Actions" subtitle="Supervision workflow shortcuts" icon={Plus}>
+        <div className="grid grid-cols-2 gap-2">
+          {actions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button key={action.label} className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-white text-center text-[11px] font-black text-navy-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50">
+                <span className={cn("grid h-9 w-9 place-items-center rounded-xl", toneMap[action.tone])}><Icon className="h-4 w-4" /></span>
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      </WidgetCard>
+
+      <WidgetCard title="Activity / Alerts" subtitle="NCR, authority, invoice, site visit feed" icon={BellRing}>
+        {items.slice(0, 5).map((item, index) => {
           const Icon = item.icon;
           return (
-            <div key={`${item.title}-${index}`} className="flex gap-3">
-              <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-2xl", toneMap[item.tone])}>
-                <Icon className="h-4 w-4" />
-              </span>
-              <div className="min-w-0 flex-1 border-b border-blue-50 pb-4 last:border-b-0">
+            <div key={`${item.title}-${index}`} className="flex gap-3 border-b border-blue-50 pb-3 last:border-b-0">
+              <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", toneMap[item.tone])}><Icon className="h-4 w-4" /></span>
+              <div className="min-w-0">
                 <p className="truncate text-sm font-black text-navy-900">{item.title}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-500">{item.meta}</p>
-                <p className="mt-1 text-[11px] font-bold text-slate-400">{formatDate(item.date)}</p>
+                <p className="text-xs font-semibold text-slate-500">{item.meta}</p>
+                <p className="text-[11px] font-bold text-slate-400">{formatDate(item.date)}</p>
               </div>
             </div>
           );
         })}
-        {items.length === 0 ? <p className="rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">No recent updates yet.</p> : null}
+      </WidgetCard>
+    </div>
+  );
+}
+
+function CardHeader({ title, subtitle, icon: Icon }: { title: string; subtitle: string; icon: LucideIcon }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <h3 className="text-base font-black text-navy-900">{title}</h3>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{subtitle}</p>
       </div>
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-blue-50 text-brand-700">
+        <Icon className="h-5 w-5" />
+      </span>
+    </div>
+  );
+}
+
+function WidgetCard({ title, subtitle, icon, children }: { title: string; subtitle: string; icon: LucideIcon; children: ReactNode }) {
+  return (
+    <PremiumCard className="p-4">
+      <CardHeader title={title} subtitle={subtitle} icon={icon} />
+      <div className="mt-4 space-y-3">{children}</div>
     </PremiumCard>
   );
 }
 
-function ChartCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+function EngineerCell({ profile }: { profile: Record<string, unknown> | null }) {
+  const name = String(profile?.full_name ?? "Unassigned engineer");
+  const designation = String(profile?.designation ?? profile?.role ?? "Site Engineer");
+  const online = name.length % 2 === 0;
   return (
-    <PremiumCard className="p-5">
-      <div className="mb-4">
-        <h3 className="text-lg font-black text-navy-900">{title}</h3>
-        <p className="text-sm font-medium text-slate-500">{subtitle}</p>
+    <div className="flex items-center gap-3">
+      <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-blue-50 text-xs font-black text-brand-700">
+        {initials(name)}
+        <span className={cn("absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-white", online ? "bg-emerald-500" : "bg-slate-300")} />
       </div>
-      {children}
-    </PremiumCard>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-black text-navy-900">{name}</p>
+        <p className="truncate text-xs font-semibold text-slate-500">{designation}</p>
+      </div>
+    </div>
   );
+}
+
+function CountBadge({ value, tone }: { value: number; tone: "blue" | "green" | "rose" }) {
+  return <span className={cn("inline-flex min-w-8 justify-center rounded-full px-2.5 py-1 text-xs font-black", toneMap[tone])}>{value}</span>;
+}
+
+function SummaryTile({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-blue-50 bg-white p-3 text-center shadow-sm">
+      <p className="text-lg font-black text-navy-900">{value}</p>
+      <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{label}</p>
+    </div>
+  );
+}
+
+function EmptyWidget({ label }: { label: string }) {
+  return <p className="rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">{label}</p>;
 }
 
 const toneMap = {
@@ -508,57 +631,74 @@ const toneMap = {
   purple: "bg-violet-50 text-violet-700"
 };
 
+function buildSupervisionRows(data: DashboardState, profileMap: Map<string, Record<string, unknown>>): SupervisionRow[] {
+  return data.projects.map((project) => {
+    const projectId = String(project.id);
+    const projectVisits = data.siteVisits.filter((visit) => String(visit.project_id) === projectId);
+    const projectNcr = data.ncr.filter((item) => String(item.project_id) === projectId);
+    const projectDocs = data.documents.filter((item) => String(item.project_id) === projectId);
+    const latestVisit = projectVisits[0];
+    const nextVisit = projectVisits.find((visit) => visit.next_visit_date)?.next_visit_date;
+    const engineerId = latestVisit?.site_engineer_id ?? project.project_manager_id;
+
+    return {
+      id: projectId,
+      refNo: String(project.project_code ?? "ANT-SITE"),
+      project: String(project.project_name ?? "Project"),
+      client: String(project.client_name ?? "Client"),
+      consultant: "ANTCPL",
+      engineer: engineerId ? profileMap.get(String(engineerId)) ?? null : null,
+      progress: Number(project.overall_progress ?? 0),
+      lastVisit: formatDate(latestVisit?.visit_date),
+      ncrOpen: projectNcr.filter((item) => item.status !== "Closed").length,
+      ncrClosed: projectNcr.filter((item) => item.status === "Closed").length,
+      qualityLogs: projectDocs.length + projectVisits.length,
+      nextInspection: formatDate(nextVisit),
+      status: String(project.status ?? "Active")
+    };
+  });
+}
+
 function buildActivityFeed(data: DashboardState): ActivityItem[] {
   const items: ActivityItem[] = [
-    ...data.documents.map((document) => ({
-      title: String(document.title ?? "Document uploaded"),
-      meta: `Drawing revision / ${String(document.document_type ?? "Document")}`,
-      date: String(document.created_at ?? new Date().toISOString()),
-      tone: "blue" as const,
-      icon: FileCheck2
+    ...data.ncr.map((item) => ({
+      title: String(item.title ?? "NCR raised"),
+      meta: `NCR / ${String(item.status ?? "Open")}`,
+      date: String(item.created_at ?? item.due_date ?? new Date().toISOString()),
+      icon: ShieldAlert,
+      tone: "rose" as const
     })),
     ...data.siteVisits.map((visit) => ({
-      title: String(visit.location ?? "Site visit scheduled"),
-      meta: `Supervision report / ${String(visit.status ?? "Scheduled")}`,
+      title: "Site visit update",
+      meta: `${String(visit.location ?? "Site")} / ${String(visit.status ?? "Scheduled")}`,
       date: String(visit.visit_date ?? new Date().toISOString()),
-      tone: "green" as const,
-      icon: CalendarCheck
+      icon: HardHat,
+      tone: "green" as const
     })),
-    ...data.ncr.map((ncr) => ({
-      title: String(ncr.title ?? "NCR action"),
-      meta: `Quality / ${String(ncr.status ?? "Open")}`,
-      date: String(ncr.created_at ?? ncr.due_date ?? new Date().toISOString()),
-      tone: "rose" as const,
-      icon: ShieldAlert
+    ...data.authority.map((item) => ({
+      title: `${String(item.authority_name ?? "Authority")} comment`,
+      meta: `${String(item.submission_type ?? "Submission")} / ${String(item.status ?? "Pending")}`,
+      date: String(item.created_at ?? item.submitted_date ?? new Date().toISOString()),
+      icon: FileText,
+      tone: "amber" as const
     })),
-    ...data.authority.map((submission) => ({
-      title: `${String(submission.authority_name ?? "Authority")} submission`,
-      meta: `${String(submission.submission_type ?? "NOC")} / ${String(submission.status ?? "Pending")}`,
-      date: String(submission.created_at ?? submission.submitted_date ?? new Date().toISOString()),
-      tone: "amber" as const,
-      icon: FileClock
-    })),
-    ...data.tasks.slice(0, 8).map((task) => ({
-      title: String(task.task_name ?? "Task update"),
-      meta: `Design task / ${String(task.status ?? "Not Started")}`,
-      date: String(task.created_at ?? task.due_date ?? new Date().toISOString()),
-      tone: "purple" as const,
-      icon: CheckCircle2
+    ...data.invoices.map((item) => ({
+      title: String(item.invoice_no ?? "Invoice update"),
+      meta: `${formatCurrency(item.total_amount)} / ${String(item.status ?? "Draft")}`,
+      date: String(item.created_at ?? item.due_date ?? new Date().toISOString()),
+      icon: ReceiptText,
+      tone: "purple" as const
     }))
   ];
 
   return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-function groupByStatus(rows: Record<string, unknown>[], key: string) {
-  const map = new Map<string, number>();
-  for (const row of rows) {
-    const label = String(row[key] ?? "Unassigned");
-    map.set(label, (map.get(label) ?? 0) + 1);
-  }
-  return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
-}
-
-function withFallback(data: Array<{ name: string; value: number }>, label: string) {
-  return data.length ? data : [{ name: label, value: 1 }];
+function initials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 }

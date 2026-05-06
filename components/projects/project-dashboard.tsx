@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Clock3,
   Download,
+  MoreHorizontal,
   FilePlus2,
   FileText,
   Flag,
@@ -22,6 +23,7 @@ import {
   Plus,
   ReceiptText,
   Send,
+  Settings2,
   UsersRound
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -379,10 +381,11 @@ export function ProjectDashboard({ projectId }: { projectId: string }) {
 
 function ProjectHeader({ project, manager, thumbnail }: { project: Record<string, unknown>; manager?: Record<string, unknown>; thumbnail: string }) {
   return (
-    <PremiumCard className="p-4">
+    <PremiumCard className="overflow-hidden p-0">
+      <div className="border-b border-blue-50 bg-gradient-to-r from-white via-white to-blue-50/60 p-4">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
-          <Image src={thumbnail} alt="" width={256} height={192} unoptimized className="h-24 w-full rounded-[1.25rem] object-cover shadow-sm sm:w-32" />
+          <Image src={thumbnail} alt="" width={256} height={192} unoptimized className="h-24 w-full rounded-[1.25rem] object-cover shadow-sm ring-1 ring-blue-100 sm:w-32" />
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <h2 className="truncate text-2xl font-black tracking-tight text-navy-900">{String(project.project_name)}</h2>
@@ -401,13 +404,13 @@ function ProjectHeader({ project, manager, thumbnail }: { project: Record<string
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <button
-            className="inline-flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-4 py-2.5 text-sm font-black text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:text-brand-700"
+            className="inline-flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-4 py-2.5 text-sm font-black text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50 hover:text-brand-700"
             onClick={() => window.print()}
           >
             <Download className="h-4 w-4" />
             Export Report
           </button>
-          <Link className="inline-flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-4 py-2.5 text-sm font-black text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:text-brand-700" href="/projects">
+          <Link className="inline-flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-4 py-2.5 text-sm font-black text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50 hover:text-brand-700" href="/projects">
             <Pencil className="h-4 w-4" />
             Edit Project
           </Link>
@@ -415,9 +418,32 @@ function ProjectHeader({ project, manager, thumbnail }: { project: Record<string
             <Plus className="h-4 w-4" />
             New Task
           </Link>
+          <button className="grid h-10 w-10 place-items-center rounded-2xl border border-blue-100 bg-white text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50 hover:text-brand-700" title="Project settings">
+            <Settings2 className="h-4 w-4" />
+          </button>
+          <button className="grid h-10 w-10 place-items-center rounded-2xl border border-blue-100 bg-white text-navy-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50 hover:text-brand-700" title="More actions">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
         </div>
       </div>
+      </div>
+      <div className="grid gap-0 divide-y divide-blue-50 bg-slate-50/60 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        <ProjectSignal label="Authority Status" value={String(project.authority ?? "Dubai Municipality")} helper="NOC / comments tracker" />
+        <ProjectSignal label="Design Stage" value={String(project.project_type ?? "Engineering Consultancy")} helper="AOR and supervision scope" />
+        <ProjectSignal label="Plot / Location" value={String(project.plot_no ?? project.location ?? "-")} helper="Dubai, UAE" />
+        <ProjectSignal label="Budget Exposure" value={formatCurrency(project.budget)} helper="Contract and invoice baseline" />
+      </div>
     </PremiumCard>
+  );
+}
+
+function ProjectSignal({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return (
+    <div className="p-4">
+      <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-black text-navy-900">{value}</p>
+      <p className="mt-1 truncate text-xs font-semibold text-slate-500">{helper}</p>
+    </div>
   );
 }
 
@@ -426,7 +452,8 @@ function StageTracker({ stages, progress }: { stages: Record<string, unknown>[];
   const currentIndex = nextIndex >= 0 ? nextIndex : Math.max(0, stages.length - 1);
 
   return (
-    <PremiumCard className="p-5">
+    <PremiumCard className="overflow-hidden p-0">
+      <div className="p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Project Stages</p>
@@ -449,6 +476,7 @@ function StageTracker({ stages, progress }: { stages: Record<string, unknown>[];
 
       <div className="mt-4">
         <ProgressBar value={progress} />
+      </div>
       </div>
     </PremiumCard>
   );

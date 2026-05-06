@@ -6,7 +6,7 @@ export function ProgressBar({ value, className }: { value?: number | null; class
   return (
     <div className={cn("h-2.5 overflow-hidden rounded-full bg-slate-100", className)} aria-label={`${safeValue}%`}>
       <div
-        className="h-full rounded-full bg-gradient-to-r from-brand-500 to-sky-400 transition-all duration-500"
+        className="animate-soft-fill h-full rounded-full bg-gradient-to-r from-brand-500 to-sky-400 transition-all duration-700"
         style={{ width: `${safeValue}%` }}
       />
     </div>

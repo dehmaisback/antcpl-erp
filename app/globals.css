@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --background: #f4f7fb;
+  --background: #f6f8fb;
   --foreground: #0b1f3a;
   --muted: #64748b;
-  --border: #dce8f6;
+  --border: #d9e5f3;
 }
 
 * {
@@ -23,9 +23,9 @@ body {
   margin: 0;
   color: var(--foreground);
   background:
-    radial-gradient(circle at 84% -10%, rgba(37, 99, 235, 0.1), transparent 34rem),
-    radial-gradient(circle at 0% 28%, rgba(14, 165, 233, 0.08), transparent 28rem),
-    linear-gradient(180deg, #f8fbff 0%, #f3f6fb 54%, #eef4fb 100%);
+    radial-gradient(circle at 88% -12%, rgba(37, 99, 235, 0.08), transparent 31rem),
+    radial-gradient(circle at 0% 26%, rgba(14, 165, 233, 0.055), transparent 28rem),
+    linear-gradient(180deg, #fbfdff 0%, #f6f8fb 48%, #f0f5fb 100%);
 }
 
 a {
@@ -60,9 +60,9 @@ select {
 }
 
 .surface-card {
-  border: 1px solid rgba(198, 216, 236, 0.78);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 48px rgba(15, 48, 88, 0.07);
+  border: 1px solid rgba(203, 218, 236, 0.82);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 34px rgba(15, 48, 88, 0.055);
 }
 
 .soft-card-hover {
@@ -77,6 +77,37 @@ select {
   transform: translateY(-2px);
   border-color: rgba(96, 165, 250, 0.5);
   box-shadow: 0 20px 50px rgba(15, 48, 88, 0.1);
+}
+
+.animate-rise-in {
+  animation: rise-in 420ms ease both;
+}
+
+.animate-soft-fill {
+  animation: soft-fill 900ms ease both;
+  transform-origin: left;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-fill {
+  from {
+    transform: scaleX(0.75);
+    opacity: 0.5;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
 }
 
 @media print {

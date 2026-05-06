@@ -45,7 +45,7 @@ export function ProtectedShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen lg:flex">
       <Sidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
-      <div className="min-w-0 flex-1 lg:pl-[18.5rem]">
+      <div className="min-w-0 flex-1 lg:pl-[17rem]">
         <Topbar onMenu={() => setMobileOpen(true)} />
         <main className="mx-auto w-full max-w-[1540px] px-4 py-5 sm:px-6 lg:px-8">
           {!configured ? (
