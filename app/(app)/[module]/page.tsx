@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { EnterpriseModulePage } from "@/components/enterprise/enterprise-module-page";
 import { getEnterpriseModule } from "@/lib/enterprise-nav";
 
-export default function EnterpriseModuleRoute({ params }: { params: { module: string } }) {
-  const navItem = getEnterpriseModule(params.module);
+export default async function EnterpriseModuleRoute({ params }: { params: Promise<{ module: string }> }) {
+  const { module } = await params;
+  const navItem = getEnterpriseModule(module);
 
   if (!navItem) {
     notFound();
